@@ -1,6 +1,6 @@
 # pg-memo
 
-PostgreSQL-backed memory skill for OpenClaw, using a small local Python script.
+PostgreSQL-backed memory skill for AI agents, using a small local Python script.
 
 ## Current status
 
@@ -155,7 +155,7 @@ Supported options:
 
 It does not print secret values.
 
-Install the OpenClaw skill files separately:
+Install the skill files separately:
 
 ```bash
 ./install-skill.sh
@@ -235,9 +235,9 @@ The script is intended to support:
 - `delete --scope <scope>`
 - `delete --all` with explicit confirmation or guardrails
 
-## Using pg-memo from OpenClaw Web UI or Feishu
+## Using pg-memo
 
-`pg-memo` is a local skill script. In OpenClaw Web UI or a Feishu chat, ask the agent in normal language to run the installed skill script.
+`pg-memo` is a local skill script. Ask the agent in normal language to run the installed skill script.
 
 ### Examples
 
@@ -301,15 +301,6 @@ Equivalent script call:
 pg-memo delete --ids 1 2 3
 ```
 
-## Recommended prompting style
-
-In OpenClaw Web UI or Feishu, use plain language such as:
-
-- `Use pg-memo to save this as a fact: User prefers professional tone.`
-- `Use pg-memo to save this as a decision: Keep built-in memory search disabled for now.`
-- `Use pg-memo to search for prior notes about PostgreSQL memory.`
-- `Use pg-memo to show recent saved memory.`
-
 ## Current limitation
 
-`pg-memo` is installed and usable, but it is still invoked through its script backend. It is not a built-in slash-command feature of OpenClaw.
+`pg-memo` is installed and usable, but it is still invoked through its script backend.

@@ -14,6 +14,35 @@ SPEC.loader.exec_module(pg_memo)
 
 
 class PgMemoTests(unittest.TestCase):
+    def test_build_parser_help_uses_pg_memo_cli_name(self) -> None:
+        with patch.object(pg_memo, "resolve_settings", return_value={
+            "default_scope": "main",
+            "default_search_limit": 10,
+            "default_recent_limit": 10,
+        }):
+            help_text = pg_memo.build_parser().format_help()
+
+        self.assertIn("Usage:\n  pg-memo <command> [options]\n  pg-memo <command> -h", help_text)
+        self.assertIn("Commands:", help_text)
+        self.assertLess(help_text.index("Usage:"), help_text.index("Commands:"))
+        self.assertFalse(help_text.startswith("usage:"))
+        self.assertNotIn("pg_memo.py", help_text)
+
+    def test_save_subcommand_help_uses_clean_prog_name(self) -> None:
+        with patch.object(pg_memo, "resolve_settings", return_value={
+            "default_scope": "main",
+            "default_search_limit": 10,
+            "default_recent_limit": 10,
+        }):
+            with self.assertRaises(SystemExit):
+                with patch("sys.argv", ["pg_memo.py", "save", "-h"]):
+                    pg_memo.build_parser().parse_args()
+
+            help_text = pg_memo.build_parser()._subparsers._group_actions[0].choices["save"].format_help()
+
+        self.assertIn("usage: pg-memo save [-h] --kind KIND", help_text)
+        self.assertNotIn("pg-memo <command> [options] save", help_text)
+
     def test_load_postgres_driver_raises_clear_error_when_no_driver_installed(self) -> None:
         with patch.object(pg_memo.importlib, "import_module", side_effect=ModuleNotFoundError()):
             with self.assertRaisesRegex(RuntimeError, "missing PostgreSQL client library"):

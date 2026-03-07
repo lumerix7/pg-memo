@@ -9,6 +9,35 @@ from typing import Any
 DEFAULT_CONFIG_PATH = "~/.config/pg-memo/config.json"
 
 
+class PgMemoArgumentParser(argparse.ArgumentParser):
+    def format_help(self) -> str:
+        if self.prog != "pg-memo":
+            return super().format_help()
+
+        formatter = self._get_formatter()
+        formatter.add_text(self.description)
+        formatter.add_text("Usage:\n  pg-memo <command> [options]\n  pg-memo <command> -h")
+
+        command_groups = []
+        other_groups = []
+        for group in self._action_groups:
+            if not group._group_actions:
+                continue
+            if group.title == "Commands":
+                command_groups.append(group)
+            else:
+                other_groups.append(group)
+
+        for group in command_groups + other_groups:
+            formatter.start_section(group.title)
+            formatter.add_text(group.description)
+            formatter.add_arguments(group._group_actions)
+            formatter.end_section()
+
+        formatter.add_text(self.epilog)
+        return formatter.format_help()
+
+
 def expand(path: str | None) -> str | None:
     if not path:
         return path
@@ -250,13 +279,17 @@ def cmd_delete(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     settings = resolve_settings()
-    parser = argparse.ArgumentParser(description="Pg Memo")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser = PgMemoArgumentParser(
+        prog="pg-memo",
+        description="pg-memo\n\nLight CLI for PostgreSQL-backed memory.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True, title="Commands")
 
-    p_config = sub.add_parser("config")
+    p_config = sub.add_parser("config", prog="pg-memo config")
     p_config.set_defaults(func=cmd_config)
 
-    p_save = sub.add_parser("save")
+    p_save = sub.add_parser("save", prog="pg-memo save")
     p_save.add_argument("--kind", required=True)
     p_save.add_argument("--scope", default=settings["default_scope"])
     p_save.add_argument("--title")
@@ -269,20 +302,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_save.add_argument("--metadata", default="{}", help="JSON object string")
     p_save.set_defaults(func=cmd_save)
 
-    p_search = sub.add_parser("search")
+    p_search = sub.add_parser("search", prog="pg-memo search")
     p_search.add_argument("--query", required=True)
     p_search.add_argument("--limit", type=int, default=settings["default_search_limit"])
     p_search.set_defaults(func=cmd_search)
 
-    p_recent = sub.add_parser("recent")
+    p_recent = sub.add_parser("recent", prog="pg-memo recent")
     p_recent.add_argument("--limit", type=int, default=settings["default_recent_limit"])
     p_recent.set_defaults(func=cmd_recent)
 
-    p_get = sub.add_parser("get")
+    p_get = sub.add_parser("get", prog="pg-memo get")
     p_get.add_argument("--id", type=int, required=True)
     p_get.set_defaults(func=cmd_get)
 
-    p_delete = sub.add_parser("delete")
+    p_delete = sub.add_parser("delete", prog="pg-memo delete")
     p_delete.add_argument("--ids", type=int, nargs="+", required=True)
     p_delete.set_defaults(func=cmd_delete)
 

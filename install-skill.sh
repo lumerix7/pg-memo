@@ -3,6 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_NAME="pg-memo"
+REQUIRED_FILES=(
+  "$ROOT_DIR/SKILL.md"
+  "$ROOT_DIR/README.md"
+  "$ROOT_DIR/install.sh"
+  "$ROOT_DIR/install-skill.sh"
+  "$ROOT_DIR/scripts/pg-memo"
+  "$ROOT_DIR/scripts/pg_memo.py"
+  "$ROOT_DIR/sql/001_init.sql"
+)
 
 display_path() {
   local value="$1"
@@ -14,15 +23,18 @@ display_path() {
 }
 
 resolve_default_targets() {
-  if command -v openclaw >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    openclaw agents list --json 2>/dev/null \
-      | awk 'BEGIN {capture=0} /^\[$/ {capture=1} capture {print; if (/^\]$/) exit}' \
-      | jq -r '.[].workspace + "/skills"' \
-      | awk 'NF' \
-      | sort -u
-    return 0
+  if ! command -v openclaw >/dev/null 2>&1; then
+    return 1
   fi
-  return 1
+  if ! command -v jq >/dev/null 2>&1; then
+    return 1
+  fi
+
+  openclaw agents list --json 2>/dev/null \
+    | awk 'BEGIN {capture=0} /^\[$/ {capture=1} capture {print; if (/^\]$/) exit}' \
+    | jq -r '.[].workspace + "/skills"' \
+    | awk 'NF' \
+    | sort -u
 }
 
 copy_skill() {
@@ -39,11 +51,48 @@ copy_skill() {
   install -m 644 "$ROOT_DIR/sql/001_init.sql" "$skill_root/sql/001_init.sql"
 }
 
+usage() {
+  cat <<'USAGE'
+Usage: ./install-skill.sh [options] [target ...]
+
+Install the pg-memo skill into one or more OpenClaw workspace skills directories.
+
+Options:
+  -y, --yes     Skip confirmation prompt
+  -h, --help    Show this help
+
+Arguments:
+  target        A skills directory to install into, for example: ~/my-workspace/skills
+
+Notes:
+  - If no targets are passed, the script tries to discover OpenClaw workspace skill directories.
+  - Automatic discovery uses openclaw + jq when available.
+USAGE
+}
+
+for required_path in "${REQUIRED_FILES[@]}"; do
+  if [[ ! -e "$required_path" ]]; then
+    echo "Missing required skill file: $required_path" >&2
+    exit 1
+  fi
+done
+
 AUTO_CONFIRM=0
-if [[ "${1:-}" == "-y" || "${1:-}" == "--yes" ]]; then
-  AUTO_CONFIRM=1
-  shift
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes)
+      AUTO_CONFIRM=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 TARGETS=("$@")
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
@@ -52,6 +101,7 @@ fi
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
   echo "No skill targets provided, and no default OpenClaw workspaces could be resolved." >&2
+  echo "Automatic discovery uses openclaw + jq when available." >&2
   echo "Pass explicit targets, for example:" >&2
   echo "  ./install-skill.sh ~/.openclaw/skills" >&2
   exit 1
@@ -73,6 +123,7 @@ if [[ $AUTO_CONFIRM -ne 1 ]]; then
 fi
 
 for target in "${TARGETS[@]}"; do
+  mkdir -p "$target"
   copy_skill "$target"
   echo "Installed skill to $(display_path "$target")/$SKILL_NAME"
 done

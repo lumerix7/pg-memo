@@ -132,6 +132,25 @@ class InstallSkillScriptTests(unittest.TestCase):
             self.assertTrue((skill_dir / "install-skill.sh").exists())
             self.assertIn("Installed skill to ~/custom-skills/pg-memo", proc.stdout)
 
+    def test_install_skill_reinstall_preserves_unmanaged_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            target = home / "custom-skills"
+            skill_dir = target / "pg-memo"
+            extra_file = skill_dir / "local-notes.txt"
+
+            first_proc = self.run_install_skill(home, "-y", str(target))
+            self.assertEqual(first_proc.returncode, 0, first_proc.stderr)
+
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            extra_file.write_text("keep me")
+
+            second_proc = self.run_install_skill(home, "-y", str(target))
+
+            self.assertEqual(second_proc.returncode, 0, second_proc.stderr)
+            self.assertTrue(extra_file.exists())
+            self.assertEqual(extra_file.read_text(), "keep me")
+
     def test_install_skill_uses_openclaw_workspace_targets_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
