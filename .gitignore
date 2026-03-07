@@ -1,0 +1,11 @@
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### Python ###
+__pycache__/
+*.pyc
+.env
+.venv/
