@@ -101,8 +101,13 @@ Preferred installed command:
 pg-memo config
 pg-memo save --kind fact --scope main --summary "User prefers professional tone"
 pg-memo search --query "professional tone"
+pg-memo search --query "postgres" --kind decision --limit 5
+pg-memo search --query "tone" --scope main --tags style
 pg-memo recent --limit 10
+pg-memo recent --kind lesson
+pg-memo recent --scope main --kind decision
 pg-memo get --id 1
+pg-memo update --id 1 --summary "Updated summary"
 pg-memo delete --ids 1 2 3
 ```
 
@@ -181,6 +186,7 @@ You can override the command location for `install.sh` with `--bin-dir /path/to/
 Initial schema file:
 
 - `sql/001_init.sql`
+- `sql/002_title_trgm.sql` (adds trigram index on title)
 
 Apply it using any PostgreSQL client that can reach the configured host/IP and port.
 
@@ -209,8 +215,11 @@ The script is intended to support:
 - `config` reads the password from `~/.config/pg-memo/password`
 - `save` inserts a row into PostgreSQL
 - `recent` returns stored rows
+- `recent` filters by `--scope` and `--kind`
 - `search` returns matching rows
+- `search` filters by `--scope`, `--kind`, and `--tags`
 - `get` returns a row by id
+- `update` patches a row by id (any combination of fields)
 - `delete --ids` removes rows by id list
 
 ### Failure and edge paths
@@ -230,7 +239,6 @@ The script is intended to support:
 
 ### TBD delete options
 
-- `delete --id <id>`
 - `delete --query <text>`
 - `delete --scope <scope>`
 - `delete --all` with explicit confirmation or guardrails
