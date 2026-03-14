@@ -11,6 +11,7 @@ REQUIRED_FILES=(
   "$ROOT_DIR/scripts/pg-memo"
   "$ROOT_DIR/scripts/pg_memo.py"
   "$ROOT_DIR/sql/001_init.sql"
+  "$ROOT_DIR/sql/002_title_trgm.sql"
 )
 
 display_path() {
@@ -49,6 +50,7 @@ copy_skill() {
   install -m 755 "$ROOT_DIR/scripts/pg-memo" "$skill_root/scripts/pg-memo"
   install -m 644 "$ROOT_DIR/scripts/pg_memo.py" "$skill_root/scripts/pg_memo.py"
   install -m 644 "$ROOT_DIR/sql/001_init.sql" "$skill_root/sql/001_init.sql"
+  install -m 644 "$ROOT_DIR/sql/002_title_trgm.sql" "$skill_root/sql/002_title_trgm.sql"
 }
 
 usage() {

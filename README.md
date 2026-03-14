@@ -1,31 +1,45 @@
 # pg-memo
 
-PostgreSQL-backed memory skill for AI agents, using a small local Python script.
+PostgreSQL-backed memory skill for AI agents. Provides durable, structured storage with full-text and trigram search, multi-workspace scoping, and a consistent JSON output interface.
 
-## Current status
+## Highlights
 
-Working skill package using direct PostgreSQL TCP/IP access.
+- **Structured storage** — save facts, preferences, decisions, lessons, and more with `--kind`, `--scope`, and `--tags`
+- **Full-text + trigram search** — powered by `pg_trgm`, `unaccent`, and tsvector FTS indexes
+- **Multi-workspace scopes** — namespace entries per workspace via `--scope`
+- **JSON by default, `--markdown` for human-readable output** — every command supports both
+- **Prune and vacuum** — age-based and cardinality-based pruning; `vacuum` reclaims space after bulk deletes
+- **Pure Python runtime** — single script, no daemon, connects directly over TCP/IP
 
-## Connection model
+## Installation
 
-`pg-memo` now connects directly to PostgreSQL using:
+```bash
+./install.sh          # installs pg-memo command + config
+./install-skill.sh    # installs SKILL.md into OpenClaw workspaces
+```
 
-- host / IP
-- port
-- database
-- user
-- password from a local password file or environment variable
+`install.sh` places the launcher at `~/.local/bin/pg-memo` and the runtime at `~/.local/share/pg-memo/pg_memo.py`. It creates `~/.config/pg-memo/config.json` and optionally writes the password file. Existing config and secrets are preserved unless `--force-config` / `--force-password` are passed.
 
-The runtime no longer uses mode switching or Docker container direct access.
+**Key options:**
 
-## Expected local config
+| Option | Description |
+|---|---|
+| `-y` / `--yes` | Non-interactive |
+| `--bin-dir <path>` | Override install location for the launcher |
+| `--runtime-dir <path>` | Override install location for the Python script |
+| `-d/u/h/p` | Database, user, host, port |
+| `--password <value>` / `--password-file <path>` | Credential source |
+| `--force-config` / `--force-password` | Overwrite existing config or password |
 
-Default local config path:
+`install-skill.sh` auto-discovers OpenClaw workspaces or accepts explicit targets:
 
-- `~/.config/pg-memo/config.json`
-- `~/.config/pg-memo/password`
+```bash
+./install-skill.sh -y ~/workspace-a/skills ~/workspace-b/skills
+```
 
-Example config:
+## Configuration
+
+Default config: `~/.config/pg-memo/config.json`
 
 ```json
 {
@@ -44,287 +58,50 @@ Example config:
 }
 ```
 
-## Precedence
+**Precedence:** CLI args → environment variables → config file → built-in defaults
 
-Settings are resolved in this order:
-
-1. CLI arguments where applicable
-2. environment variables
-3. config file
-4. built-in defaults
-
-Supported environment variables:
-
-- `PG_MEMO_CONFIG`
-- `PG_MEMO_DB`
-- `PG_MEMO_USER`
-- `PG_MEMO_PASSWORD`
-- `PG_MEMO_PASSWORD_FILE`
-- `PG_MEMO_HOST`
-- `PG_MEMO_PORT`
+**Environment variables:** `PG_MEMO_CONFIG`, `PG_MEMO_HOST`, `PG_MEMO_PORT`, `PG_MEMO_DB`, `PG_MEMO_USER`, `PG_MEMO_PASSWORD`, `PG_MEMO_PASSWORD_FILE`
 
 ## Python dependency
 
-The runtime requires a PostgreSQL client library for Python.
-
-On Ubuntu/Debian systems using apt, install:
-
-```bash
-sudo apt install python3-psycopg
-```
-
-Recommended with pip:
+Requires `psycopg` or `psycopg2`. Preferred:
 
 ```bash
 python3 -m pip install --user "psycopg[binary]"
+# or: sudo apt install python3-psycopg
 ```
 
-Fallbacks also work:
-
-```bash
-sudo apt install python3-psycopg2
-```
-
-or
-
-```bash
-python3 -m pip install --user psycopg2-binary
-```
-
-If neither is installed, the script returns a structured error explaining what is missing.
-
-## Commands
-
-Preferred installed command:
-
-```bash
-pg-memo config
-pg-memo save --kind fact --scope main --summary "User prefers professional tone"
-pg-memo search --query "professional tone"
-pg-memo search --query "postgres" --kind decision --limit 5
-pg-memo search --query "tone" --scope main --tags style
-pg-memo recent --limit 10
-pg-memo recent --kind lesson
-pg-memo recent --scope main --kind decision
-pg-memo get --id 1
-pg-memo update --id 1 --summary "Updated summary"
-pg-memo delete --ids 1 2 3
-pg-memo prune --kind host_security --scope host --keep-latest 4 --dry-run
-pg-memo prune --older-than 90 --dry-run
-pg-memo vacuum --markdown
-```
-
-Fallbacks:
-
-- `~/.local/bin/pg-memo`
-- `~/.openclaw/skills/pg-memo/scripts/pg-memo`
-
-## Install helpers
-
-Install the local command and config helper:
-
-```bash
-./install.sh
-```
-
-Useful options:
-
-```bash
-./install.sh -y --password-file ~/.secrets/pg-memo-password
-./install.sh --bin-dir ~/.local/bin
-./install.sh --runtime-dir ~/.local/share/pg-memo
-./install.sh --force-config -d openclaw -u openclaw -h 127.0.0.1 -p 5432
-./install.sh --password 'secret' --force-password
-```
-
-Supported options:
-
-- `-y`, `--yes`
-- `--bin-dir <path>`
-- `--runtime-dir <path>`
-- `--password <value>`
-- `--password-file <path>`
-- `-d`, `--database <name>`
-- `-u`, `--user <name>`
-- `-h`, `--host <host>`
-- `-p`, `--port <port>`
-- `--force-config`
-- `--force-password`
-
-`install.sh` will:
-
-- install the `pg-memo` launcher under `~/.local/bin/` by default
-- install `pg_memo.py` under `~/.local/share/pg-memo/` by default
-- create `~/.config/pg-memo/`
-- create `~/.config/pg-memo/config.json`
-- create or update `~/.config/pg-memo/password` when instructed
-- preserve existing config unless you explicitly overwrite it
-- preserve secret values unless you explicitly overwrite them
-
-It does not print secret values.
-
-Install the skill files separately:
-
-```bash
-./install-skill.sh
-```
-
-By default `install-skill.sh` resolves OpenClaw workspaces and installs into each `<workspace>/skills/pg-memo`. You can also pass explicit targets:
-
-```bash
-./install-skill.sh ~/.openclaw/skills
-./install-skill.sh -y ~/workspace-a/skills ~/workspace-b/skills
-```
-
-Expected installed skill location:
-
-- `~/.openclaw/skills/pg-memo/SKILL.md`
-- `~/.openclaw/skills/pg-memo/scripts/pg-memo`
-- `~/.local/bin/pg-memo`
-
-You can override the command location for `install.sh` with `--bin-dir /path/to/bin`.
+Fallback: `psycopg2-binary` / `python3-psycopg2`. If neither is present, the script returns a structured dependency error.
 
 ## Schema bootstrap
 
-Initial schema file:
-
-- `sql/001_init.sql`
-- `sql/002_title_trgm.sql` (adds trigram index on title)
-
-Apply it using any PostgreSQL client that can reach the configured host/IP and port.
-
-Example with `psql`:
+Apply migrations in order using any PostgreSQL client:
 
 ```bash
 PGPASSWORD="$(cat ~/.config/pg-memo/password)" \
-psql -h 127.0.0.1 -p 5432 -U openclaw -d openclaw -v ON_ERROR_STOP=1 -f sql/001_init.sql
+psql -h 127.0.0.1 -p 5432 -U openclaw -d openclaw -v ON_ERROR_STOP=1 \
+  -f sql/001_init.sql -f sql/002_title_trgm.sql
 ```
 
-This creates:
+`001_init.sql` creates the `memory_items` table, `pg_trgm`/`unaccent` extensions, timestamp and FTS triggers, and indexes on scope, kind, tags, FTS, and source date. `002_title_trgm.sql` adds a trigram index on the title field.
 
-- extensions: `pg_trgm`, `unaccent`
-- table: `memory_items`
-- functions: `memory_items_set_timestamps`, `memory_items_fts_update`
-- triggers for timestamps and FTS updates
-- indexes for scope, kind, source date, tags, FTS, and trigram search
-
-## Tested behavior
-
-The script is intended to support:
-
-### Working paths
-
-- `config` reads `~/.config/pg-memo/config.json`
-- `config` reads the password from `~/.config/pg-memo/password`
-- `save` inserts a row into PostgreSQL
-- `recent` returns stored rows
-- `recent` filters by `--scope` and `--kind`
-- `search` returns matching rows
-- `search` filters by `--scope`, `--kind`, and `--tags`
-- `get` returns a row by id
-- `update` patches a row by id (any combination of fields)
-- `delete --ids` removes rows by id list
-- `prune --older-than DAYS` deletes entries not updated within N days
-- `prune --keep-latest N` deletes entries beyond the N most recent per kind+scope
-- `prune --dry-run` previews without deleting
-- `prune` accepts `--scope` and `--kind` to narrow the target set
-- `vacuum` runs `VACUUM ANALYZE memory_items` and returns table stats
-
-### Failure and edge paths
-
-- invalid `--metadata` JSON returns a structured error
-- a search miss returns an empty `results` array
-- a missing password file returns `database password not configured`
-- missing Python PostgreSQL client returns a structured dependency error
-
-### Not fully covered yet
-
-- database unavailable over TCP/IP
-- schema drift or missing table/function
-- very large payloads
-- concurrent writes
-
-## Using pg-memo
-
-`pg-memo` is a local skill script. Ask the agent in normal language to run the installed skill script.
-
-### Examples
-
-Save a short memory:
-
-```text
-Use pg-memo to save a daily note: Hi
-```
-
-Equivalent script call:
+## Commands
 
 ```bash
-pg-memo save --kind daily_note --summary "Hi"
-```
-
-Search memory:
-
-```text
-Use pg-memo to search for: professional tone
-```
-
-Equivalent script call:
-
-```bash
-pg-memo search --query "professional tone"
-```
-
-Show recent memory:
-
-```text
-Use pg-memo to show recent memory
-```
-
-Equivalent script call:
-
-```bash
-pg-memo recent --limit 5
-```
-
-Show config:
-
-```text
-Use pg-memo to show config
-```
-
-Equivalent script call:
-
-```bash
-pg-memo config
-```
-
-Delete entries by id:
-
-```text
-Use pg-memo to delete memory ids 1, 2, and 3
-```
-
-Equivalent script call:
-
-```bash
+pg-memo config                                        # show resolved config
+pg-memo save --kind fact --scope main \
+  --summary "..." --content "..." --tags a b          # save a memory
+pg-memo update --id 42 --summary "..."                # patch any field(s)
+pg-memo get --id 42                                   # fetch by id
+pg-memo search --query "text" [--kind K] [--scope S] [--tags T] [--limit N]
+pg-memo recent [--kind K] [--scope S] [--limit N]
+pg-memo scopes                                        # list scopes in the database
 pg-memo delete --ids 1 2 3
+pg-memo prune --older-than 90 [--dry-run]             # age-based prune
+pg-memo prune --keep-latest 4 --kind K --scope S [--dry-run]  # cardinality prune
+pg-memo vacuum                                        # VACUUM ANALYZE + table stats
 ```
 
-Prune old entries:
+Add `--markdown` to any command for human-readable output.
 
-```text
-Use pg-memo to prune host_security entries in scope host, keeping only the 4 most recent
-```
-
-Equivalent script call:
-
-```bash
-pg-memo prune --kind host_security --scope host --keep-latest 4 --dry-run
-pg-memo prune --kind host_security --scope host --keep-latest 4
-```
-
-Vacuum after bulk deletes:
-
-```bash
-pg-memo vacuum --markdown
-```
+**Fallback paths** (if not on `PATH`): `~/.local/bin/pg-memo` · `~/.openclaw/skills/pg-memo/scripts/pg-memo`
