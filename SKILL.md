@@ -1,6 +1,6 @@
 ---
 name: pg-memo
-description: PostgreSQL-backed long-term memory. Save, update, search, and browse structured notes with full-text + trigram search.
+description: PostgreSQL-backed long-term memory. Save, update, search, browse, prune, and vacuum structured notes with full-text + trigram search.
 ---
 
 # Pg Memo
@@ -24,8 +24,11 @@ When in doubt about where to save something durable: **use pg-memo**.
 | "remember this" | `pg-memo save` + update MEMORY.md index |
 | Looking up a past fact or decision | `pg-memo search` |
 | Browsing recent notes | `pg-memo recent` |
+| Getting full content of a specific item | `pg-memo get --id N` |
 | Updating a stale memory | `pg-memo update --id N` |
-| Removing obsolete entries | `pg-memo delete --ids ...` |
+| Removing obsolete entries by ID | `pg-memo delete --ids ...` |
+| Pruning old or excess entries by age/count | `pg-memo prune` |
+| Reclaiming database space after bulk deletes | `pg-memo vacuum` |
 
 ## Kind taxonomy
 
@@ -78,8 +81,22 @@ pg-memo get --id 42
 # Discover scopes in the database
 pg-memo scopes --markdown
 
-# Delete entries
+# Delete entries by explicit ID list
 pg-memo delete --ids 1 2 3
+
+# Prune entries by age (not updated in last N days)
+pg-memo prune --older-than 90 --dry-run   # preview first
+pg-memo prune --older-than 90
+
+# Prune by cardinality (keep only N most recent per kind+scope)
+pg-memo prune --kind host_security --scope host --keep-latest 4 --dry-run
+pg-memo prune --kind host_security --scope host --keep-latest 4
+
+# Combine: delete entries that are old AND/OR exceed keep-latest
+pg-memo prune --older-than 30 --keep-latest 10 --scope default
+
+# Vacuum: reclaim space after bulk deletes
+pg-memo vacuum --markdown
 
 # Show resolved config
 pg-memo config
@@ -145,7 +162,7 @@ Each workspace has its own `MEMORY.md`. It is a **human-readable index** into pg
 **Rules:**
 - After `pg-memo save`, append `[#<new_id>] <summary>` to the relevant section in MEMORY.md
 - After `pg-memo update --id N`, update the corresponding line in MEMORY.md
-- After `pg-memo delete --ids N`, remove the corresponding lines from MEMORY.md
+- After `pg-memo delete --ids N` or `pg-memo prune`, remove the corresponding lines from MEMORY.md
 - To read the full content of any item: `pg-memo get --id N --markdown`
 - Entries without an id yet (not yet in pg-memo) use `[#?]` as a placeholder
 
@@ -159,6 +176,9 @@ All commands output JSON by default. Add `--markdown` to any command to get huma
 | `get` | detail block with all fields |
 | `save` / `update` | `✅ Saved/Updated #ID · kind · summary` |
 | `delete` | `🗑️ Deleted: 1, 2, 3` |
+| `prune --dry-run` | table of items that would be deleted |
+| `prune` | `🗑️ Pruned N item(s): 1, 2, 3` |
+| `vacuum` | stats block (live/dead tuples, last vacuum/analyze) |
 | `config` | fenced JSON block |
 
 ## Rules

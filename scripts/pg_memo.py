@@ -226,6 +226,32 @@ def print_markdown(obj: Any) -> int:
         else:
             print(f"🗑️ Deleted: {', '.join(str(i) for i in deleted)}")
 
+    elif action == "prune":
+        dry = obj.get("dry_run", False)
+        if dry:
+            count = obj.get("would_delete_count", 0)
+            rows = obj.get("would_delete") or []
+            print(f"**Prune dry-run:** {count} item(s) would be deleted\n")
+            if rows:
+                print(_md_table(rows))
+        else:
+            count = obj.get("deleted_count", 0)
+            ids = obj.get("deleted_ids") or []
+            if count == 0:
+                print("_Prune: nothing to delete._")
+            else:
+                print(f"🗑️ Pruned {count} item(s): {', '.join(str(i) for i in ids)}")
+
+    elif action == "vacuum":
+        stats = obj.get("stats") or {}
+        lines = ["✅ **VACUUM ANALYZE** complete"]
+        if stats:
+            lines.append(f"- live tuples: {stats.get('live_tuples', '?')}")
+            lines.append(f"- dead tuples: {stats.get('dead_tuples', '?')}")
+            lines.append(f"- last vacuum: {stats.get('last_vacuum', '?')}")
+            lines.append(f"- last analyze: {stats.get('last_analyze', '?')}")
+        print("\n".join(lines))
+
     elif action == "config":
         cfg = obj.get("config") or {}
         print("```json\n" + json.dumps(cfg, ensure_ascii=False, indent=2) + "\n```")
@@ -463,6 +489,119 @@ def cmd_update(args: argparse.Namespace) -> int:
     return _emit(args, {"status": "ok", "action": "update", "item": obj})
 
 
+def cmd_prune(args: argparse.Namespace) -> int:
+    if args.older_than is None and args.keep_latest is None:
+        return _emit(args, {
+            "status": "error", "action": "prune",
+            "error": "provide --older-than DAYS and/or --keep-latest N",
+        })
+
+    scope_cond = ["scope = %s"] if args.scope else []
+    kind_cond = ["kind = %s"] if args.kind else []
+    filter_params: list[Any] = []
+    if args.scope:
+        filter_params.append(args.scope)
+    if args.kind:
+        filter_params.append(args.kind)
+    base_where = ("WHERE " + " AND ".join(scope_cond + kind_cond)) if filter_params else ""
+
+    candidate_ids: set[int] = set()
+
+    if args.older_than is not None:
+        age_extra = " AND " if base_where else "WHERE "
+        age_sql = f"""
+        SELECT COALESCE(json_agg(id), '[]'::json)
+        FROM memory_items {base_where}
+        {age_extra if not base_where else "AND "}updated_at < NOW() - (INTERVAL '1 day' * %s);
+        """
+        # Rebuild cleanly to avoid double WHERE
+        age_conds = scope_cond + kind_cond + ["updated_at < NOW() - (INTERVAL '1 day' * %s)"]
+        age_sql = "SELECT COALESCE(json_agg(id), '[]'::json) FROM memory_items WHERE " + " AND ".join(age_conds) + ";"
+        age_params = tuple(filter_params + [args.older_than])
+        ids = execute_json_query(age_sql, age_params) or []
+        candidate_ids.update(ids)
+
+    if args.keep_latest is not None:
+        ranked_where = ("WHERE " + " AND ".join(scope_cond + kind_cond)) if filter_params else ""
+        keep_sql = f"""
+        WITH ranked AS (
+          SELECT id,
+                 ROW_NUMBER() OVER (PARTITION BY kind, scope ORDER BY updated_at DESC, id DESC) AS rn
+          FROM memory_items {ranked_where}
+        )
+        SELECT COALESCE(json_agg(id), '[]'::json) FROM ranked WHERE rn > %s;
+        """
+        keep_params = tuple(filter_params + [args.keep_latest])
+        ids = execute_json_query(keep_sql, keep_params) or []
+        candidate_ids.update(ids)
+
+    to_delete = sorted(candidate_ids)
+
+    if args.dry_run:
+        if to_delete:
+            preview_sql = """
+            WITH rows AS (
+              SELECT id, kind, scope, title, summary, updated_at
+              FROM memory_items WHERE id = ANY(%s::bigint[])
+              ORDER BY updated_at, id
+            )
+            SELECT COALESCE(json_agg(rows), '[]'::json) FROM rows;
+            """
+            preview = execute_json_query(preview_sql, (to_delete,)) or []
+        else:
+            preview = []
+        return _emit(args, {
+            "status": "ok", "action": "prune",
+            "dry_run": True,
+            "would_delete_count": len(to_delete),
+            "would_delete": preview,
+        })
+
+    if not to_delete:
+        return _emit(args, {
+            "status": "ok", "action": "prune",
+            "dry_run": False,
+            "deleted_count": 0,
+            "deleted_ids": [],
+        })
+
+    delete_sql = """
+    WITH deleted AS (
+      DELETE FROM memory_items WHERE id = ANY(%s::bigint[]) RETURNING id
+    )
+    SELECT COALESCE(json_agg(deleted.id ORDER BY deleted.id), '[]'::json) FROM deleted;
+    """
+    deleted_ids = execute_json_query(delete_sql, (to_delete,)) or []
+    return _emit(args, {
+        "status": "ok", "action": "prune",
+        "dry_run": False,
+        "deleted_count": len(deleted_ids),
+        "deleted_ids": deleted_ids,
+    })
+
+
+def cmd_vacuum(args: argparse.Namespace) -> int:
+    conn, _ = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("VACUUM ANALYZE memory_items;")
+    finally:
+        conn.close()
+
+    stats_sql = """
+    SELECT json_build_object(
+      'live_tuples', n_live_tup,
+      'dead_tuples', n_dead_tup,
+      'last_vacuum', last_vacuum::text,
+      'last_analyze', last_analyze::text
+    )
+    FROM pg_stat_user_tables
+    WHERE relname = 'memory_items';
+    """
+    stats = execute_json_query(stats_sql, ()) or {}
+    return _emit(args, {"status": "ok", "action": "vacuum", "stats": stats})
+
+
 def cmd_scopes(args: argparse.Namespace) -> int:
     sql = """
     WITH rows AS (
@@ -549,6 +688,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_scopes = sub.add_parser("scopes", prog="pg-memo scopes")
     _add_md(p_scopes)
     p_scopes.set_defaults(func=cmd_scopes)
+
+    p_prune = sub.add_parser("prune", prog="pg-memo prune",
+                              description="Delete entries by age or cardinality. "
+                                          "Requires --older-than and/or --keep-latest.")
+    p_prune.add_argument("--scope", help="restrict to this scope")
+    p_prune.add_argument("--kind", help="restrict to this kind")
+    p_prune.add_argument("--older-than", type=int, metavar="DAYS",
+                         help="delete entries not updated in the last DAYS days")
+    p_prune.add_argument("--keep-latest", type=int, metavar="N",
+                         help="within each kind+scope group, keep only the N most recent entries")
+    p_prune.add_argument("--dry-run", action="store_true", default=False,
+                         help="preview what would be deleted without deleting")
+    _add_md(p_prune)
+    p_prune.set_defaults(func=cmd_prune)
+
+    p_vacuum = sub.add_parser("vacuum", prog="pg-memo vacuum",
+                               description="Run VACUUM ANALYZE on the memory_items table.")
+    _add_md(p_vacuum)
+    p_vacuum.set_defaults(func=cmd_vacuum)
 
     return parser
 

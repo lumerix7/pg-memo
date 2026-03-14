@@ -526,6 +526,165 @@ class PgMemoTests(unittest.TestCase):
             sys.stdout = sys.__stdout__
         self.assertIn("empty", captured.getvalue())
 
+    # ------------------------------------------------------------------ prune
+    def test_cmd_prune_requires_at_least_one_filter(self) -> None:
+        args = SimpleNamespace(markdown=False, scope=None, kind=None, older_than=None, keep_latest=None, dry_run=False)
+        with patch.object(pg_memo, "print_json", return_value=0) as fake_print:
+            pg_memo.cmd_prune(args)
+        out = fake_print.call_args[0][0]
+        self.assertEqual(out["status"], "error")
+        self.assertEqual(out["action"], "prune")
+
+    def test_cmd_prune_older_than_deletes_matching_ids(self) -> None:
+        args = SimpleNamespace(markdown=False, scope=None, kind=None, older_than=14, keep_latest=None, dry_run=False)
+        query_results = [[3, 5], [3, 5]]  # first call: age query; second call: delete
+        call_count = 0
+
+        def fake_query(sql, params=()):
+            nonlocal call_count
+            result = query_results[call_count]
+            call_count += 1
+            return result
+
+        with patch.object(pg_memo, "execute_json_query", side_effect=fake_query):
+            with patch.object(pg_memo, "print_json", return_value=0) as fake_print:
+                pg_memo.cmd_prune(args)
+
+        out = fake_print.call_args[0][0]
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["action"], "prune")
+        self.assertFalse(out["dry_run"])
+        self.assertEqual(out["deleted_ids"], [3, 5])
+
+    def test_cmd_prune_keep_latest_deletes_excess_ids(self) -> None:
+        args = SimpleNamespace(markdown=False, scope="host", kind="host_security", older_than=None, keep_latest=4, dry_run=False)
+        excess_ids = [19, 20, 22]
+
+        def fake_query(sql, params=()):
+            if "ROW_NUMBER" in sql:
+                return excess_ids
+            return excess_ids  # delete returns same
+
+        with patch.object(pg_memo, "execute_json_query", side_effect=fake_query):
+            with patch.object(pg_memo, "print_json", return_value=0) as fake_print:
+                pg_memo.cmd_prune(args)
+
+        out = fake_print.call_args[0][0]
+        self.assertEqual(out["deleted_ids"], excess_ids)
+
+    def test_cmd_prune_dry_run_does_not_delete(self) -> None:
+        args = SimpleNamespace(markdown=False, scope=None, kind=None, older_than=30, keep_latest=None, dry_run=True)
+        preview_items = [{"id": 1, "kind": "note", "scope": "default", "summary": "old note", "updated_at": "2026-01-01"}]
+        call_results = [[1], preview_items]
+        call_count = 0
+
+        def fake_query(sql, params=()):
+            nonlocal call_count
+            result = call_results[call_count]
+            call_count += 1
+            return result
+
+        with patch.object(pg_memo, "execute_json_query", side_effect=fake_query):
+            with patch.object(pg_memo, "print_json", return_value=0) as fake_print:
+                pg_memo.cmd_prune(args)
+
+        out = fake_print.call_args[0][0]
+        self.assertTrue(out["dry_run"])
+        self.assertEqual(out["would_delete_count"], 1)
+        # Confirm DELETE was never called (only age SELECT + preview SELECT, not delete)
+        self.assertNotIn("deleted_ids", out)
+
+    def test_cmd_prune_returns_nothing_to_delete_when_empty(self) -> None:
+        args = SimpleNamespace(markdown=False, scope=None, kind="lesson", older_than=90, keep_latest=None, dry_run=False)
+        with patch.object(pg_memo, "execute_json_query", return_value=[]):
+            with patch.object(pg_memo, "print_json", return_value=0) as fake_print:
+                pg_memo.cmd_prune(args)
+        out = fake_print.call_args[0][0]
+        self.assertEqual(out["deleted_count"], 0)
+        self.assertEqual(out["deleted_ids"], [])
+
+    def test_print_markdown_prune_dry_run(self) -> None:
+        import io, sys
+        obj = {
+            "status": "ok", "action": "prune", "dry_run": True,
+            "would_delete_count": 2,
+            "would_delete": [
+                {"id": 3, "kind": "note", "scope": "default", "summary": "old", "updated_at": "2026-01-01"},
+                {"id": 5, "kind": "note", "scope": "default", "summary": "older", "updated_at": "2025-12-01"},
+            ],
+        }
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            pg_memo.print_markdown(obj)
+        finally:
+            sys.stdout = sys.__stdout__
+        out = captured.getvalue()
+        self.assertIn("dry-run", out)
+        self.assertIn("2", out)
+
+    def test_print_markdown_prune_deleted(self) -> None:
+        import io, sys
+        obj = {"status": "ok", "action": "prune", "dry_run": False, "deleted_count": 3, "deleted_ids": [19, 20, 22]}
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            pg_memo.print_markdown(obj)
+        finally:
+            sys.stdout = sys.__stdout__
+        out = captured.getvalue()
+        self.assertIn("🗑️", out)
+        self.assertIn("3", out)
+
+    def test_print_markdown_prune_nothing_to_delete(self) -> None:
+        import io, sys
+        obj = {"status": "ok", "action": "prune", "dry_run": False, "deleted_count": 0, "deleted_ids": []}
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            pg_memo.print_markdown(obj)
+        finally:
+            sys.stdout = sys.__stdout__
+        self.assertIn("nothing", captured.getvalue())
+
+    # ----------------------------------------------------------------- vacuum
+    def test_cmd_vacuum_runs_vacuum_and_returns_stats(self) -> None:
+        fake_stats = {"live_tuples": 37, "dead_tuples": 0, "last_vacuum": "2026-03-17", "last_analyze": "2026-03-17"}
+        fake_cursor = Mock()
+        fake_cursor.__enter__ = Mock(return_value=fake_cursor)
+        fake_cursor.__exit__ = Mock(return_value=False)
+        fake_conn = Mock()
+        fake_conn.cursor.return_value = fake_cursor
+
+        args = SimpleNamespace(markdown=False)
+        with patch.object(pg_memo, "connect", return_value=(fake_conn, "psycopg2")):
+            with patch.object(pg_memo, "execute_json_query", return_value=fake_stats):
+                with patch.object(pg_memo, "print_json", return_value=0) as fake_print:
+                    pg_memo.cmd_vacuum(args)
+
+        fake_cursor.execute.assert_called_once_with("VACUUM ANALYZE memory_items;")
+        out = fake_print.call_args[0][0]
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["action"], "vacuum")
+        self.assertEqual(out["stats"], fake_stats)
+
+    def test_print_markdown_vacuum_renders_stats(self) -> None:
+        import io, sys
+        obj = {
+            "status": "ok", "action": "vacuum",
+            "stats": {"live_tuples": 37, "dead_tuples": 2, "last_vacuum": "2026-03-17", "last_analyze": "2026-03-17"},
+        }
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            pg_memo.print_markdown(obj)
+        finally:
+            sys.stdout = sys.__stdout__
+        out = captured.getvalue()
+        self.assertIn("✅", out)
+        self.assertIn("VACUUM", out)
+        self.assertIn("37", out)
+
 
 if __name__ == "__main__":
     unittest.main()

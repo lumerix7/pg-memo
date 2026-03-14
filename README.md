@@ -109,6 +109,9 @@ pg-memo recent --scope main --kind decision
 pg-memo get --id 1
 pg-memo update --id 1 --summary "Updated summary"
 pg-memo delete --ids 1 2 3
+pg-memo prune --kind host_security --scope host --keep-latest 4 --dry-run
+pg-memo prune --older-than 90 --dry-run
+pg-memo vacuum --markdown
 ```
 
 Fallbacks:
@@ -221,6 +224,11 @@ The script is intended to support:
 - `get` returns a row by id
 - `update` patches a row by id (any combination of fields)
 - `delete --ids` removes rows by id list
+- `prune --older-than DAYS` deletes entries not updated within N days
+- `prune --keep-latest N` deletes entries beyond the N most recent per kind+scope
+- `prune --dry-run` previews without deleting
+- `prune` accepts `--scope` and `--kind` to narrow the target set
+- `vacuum` runs `VACUUM ANALYZE memory_items` and returns table stats
 
 ### Failure and edge paths
 
@@ -235,13 +243,6 @@ The script is intended to support:
 - schema drift or missing table/function
 - very large payloads
 - concurrent writes
-- update flows
-
-### TBD delete options
-
-- `delete --query <text>`
-- `delete --scope <scope>`
-- `delete --all` with explicit confirmation or guardrails
 
 ## Using pg-memo
 
@@ -309,6 +310,21 @@ Equivalent script call:
 pg-memo delete --ids 1 2 3
 ```
 
-## Current limitation
+Prune old entries:
 
-`pg-memo` is installed and usable, but it is still invoked through its script backend.
+```text
+Use pg-memo to prune host_security entries in scope host, keeping only the 4 most recent
+```
+
+Equivalent script call:
+
+```bash
+pg-memo prune --kind host_security --scope host --keep-latest 4 --dry-run
+pg-memo prune --kind host_security --scope host --keep-latest 4
+```
+
+Vacuum after bulk deletes:
+
+```bash
+pg-memo vacuum --markdown
+```
